@@ -223,6 +223,8 @@ if 'y2' not in st.session_state:
     st.session_state.y2 = None
 if 'last_action' not in st.session_state:
     st.session_state.last_action = None
+if 'last_click' not in st.session_state:
+    st.session_state.last_click = None  # 记录上一次处理的点击坐标
 
 
 # 主界面
@@ -274,10 +276,14 @@ if uploaded_file is not None:
     with col_btn1:
         if st.button("🔴 设置左上角", use_container_width=True, type="secondary"):
             st.session_state.click_mode = 'topleft'
+            st.session_state.last_click = None  # 清除旧的点击记录
+            st.rerun()
     
     with col_btn2:
         if st.button("🔵 设置右下角", use_container_width=True, type="secondary"):
             st.session_state.click_mode = 'bottomright'
+            st.session_state.last_click = None  # 清除旧的点击记录
+            st.rerun()
     
     with col_btn3:
         if st.button("🔄 重置", use_container_width=True):
@@ -312,25 +318,29 @@ if uploaded_file is not None:
     # 可点击的图片
     coords = streamlit_image_coordinates(display_image, key="main_image")
     
-    # 处理点击
+    # 处理点击 - 只有新的点击才处理
     if coords is not None:
-        click_x = coords["x"]
-        click_y = coords["y"]
+        current_click = (coords["x"], coords["y"])
         
-        if st.session_state.click_mode == 'topleft':
-            st.session_state.x1 = click_x
-            st.session_state.y1 = click_y
-            st.session_state.click_mode = None
-            st.session_state.last_action = f"✅ 左上角已设置: ({click_x}, {click_y})"
-            st.toast(f"🔴 左上角已设置!", icon="✅")
-            st.rerun()
-        elif st.session_state.click_mode == 'bottomright':
-            st.session_state.x2 = click_x
-            st.session_state.y2 = click_y
-            st.session_state.click_mode = None
-            st.session_state.last_action = f"✅ 右下角已设置: ({click_x}, {click_y})"
-            st.toast(f"🔵 右下角已设置!", icon="✅")
-            st.rerun()
+        # 检查是否是新的点击（坐标不同于上一次）
+        is_new_click = (st.session_state.last_click != current_click)
+        
+        if is_new_click and st.session_state.click_mode is not None:
+            click_x, click_y = current_click
+            st.session_state.last_click = current_click  # 记录这次点击
+            
+            if st.session_state.click_mode == 'topleft':
+                st.session_state.x1 = click_x
+                st.session_state.y1 = click_y
+                st.session_state.click_mode = None
+                st.session_state.last_action = f"✅ 左上角已设置: ({click_x}, {click_y})"
+                st.rerun()
+            elif st.session_state.click_mode == 'bottomright':
+                st.session_state.x2 = click_x
+                st.session_state.y2 = click_y
+                st.session_state.click_mode = None
+                st.session_state.last_action = f"✅ 右下角已设置: ({click_x}, {click_y})"
+                st.rerun()
     
     st.markdown("---")
     
