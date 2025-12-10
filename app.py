@@ -3,15 +3,16 @@
 """
 💕 拼豆图纸镜像工具
 在线版本 - 支持手机和电脑浏览器
+点击图片设置区域，更适合手机操作
 """
 
 import streamlit as st
 import numpy as np
 import cv2
-from PIL import Image
+from PIL import Image, ImageDraw
 from io import BytesIO
 from collections import Counter
-from streamlit_cropper import st_cropper
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(
     page_title="拼豆图纸镜像工具 💕",
@@ -30,21 +31,37 @@ st.markdown("""
         background: linear-gradient(90deg, #ff6b9d, #c44569, #ff6b9d);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 2.5rem;
+        font-size: 2rem;
         font-weight: bold;
         margin-bottom: 0.5rem;
     }
     .subtitle {
         text-align: center;
         color: #a6adc8;
-        font-size: 1rem;
-        margin-bottom: 2rem;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+    }
+    .coord-box {
+        background: #313244;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 5px 0;
+        text-align: center;
+    }
+    .click-hint {
+        background: #89b4fa;
+        color: #1e1e2e;
+        padding: 10px;
+        border-radius: 8px;
+        text-align: center;
+        font-weight: bold;
+        margin: 10px 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">🎨 拼豆图纸镜像工具</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">上传图纸 → 拖动红框选择区域 → 一键镜像 ✨</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">点击图片设置区域 → 一键镜像 ✨</p>', unsafe_allow_html=True)
 
 
 def remove_watermark_from_cell(cell_array):
@@ -142,6 +159,42 @@ def process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark):
     return Image.fromarray(new_img_array)
 
 
+def draw_selection(image, x1, y1, x2, y2):
+    """绘制选区"""
+    img_copy = image.copy()
+    draw = ImageDraw.Draw(img_copy)
+    
+    if x1 is not None and y1 is not None:
+        # 画左上角标记
+        r = 15
+        draw.ellipse([x1-r, y1-r, x1+r, y1+r], fill='red', outline='white')
+        
+    if x2 is not None and y2 is not None:
+        # 画右下角标记
+        r = 15
+        draw.ellipse([x2-r, y2-r, x2+r, y2+r], fill='blue', outline='white')
+    
+    if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
+        # 画矩形框
+        for i in range(3):
+            draw.rectangle([x1-i, y1-i, x2+i, y2+i], outline='lime')
+    
+    return img_copy
+
+
+# 初始化 session state
+if 'click_mode' not in st.session_state:
+    st.session_state.click_mode = None
+if 'x1' not in st.session_state:
+    st.session_state.x1 = None
+if 'y1' not in st.session_state:
+    st.session_state.y1 = None
+if 'x2' not in st.session_state:
+    st.session_state.x2 = None
+if 'y2' not in st.session_state:
+    st.session_state.y2 = None
+
+
 # 主界面
 uploaded_file = st.file_uploader("📁 上传拼豆图纸", type=['png', 'jpg', 'jpeg', 'bmp', 'webp'])
 
@@ -149,115 +202,132 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert('RGB')
     width, height = image.size
     
-    st.markdown("---")
+    # 设置默认值
+    if st.session_state.x1 is None:
+        st.session_state.x1 = int(width * 0.025)
+        st.session_state.y1 = int(height * 0.035)
+        st.session_state.x2 = int(width * 0.975)
+        st.session_state.y2 = int(height * 0.83)
     
-    # ========== 设置参数 ==========
-    st.subheader("1️⃣ 设置格子数量")
-    
-    col1, col2, col3 = st.columns([1, 1, 2])
-    
-    with col1:
-        preset = st.selectbox("预设尺寸", ["52×47", "20×20", "29×29", "50×50", "100×100", "自定义"])
-        
-        if preset == "20×20":
-            default_cols, default_rows = 20, 20
-        elif preset == "29×29":
-            default_cols, default_rows = 29, 29
-        elif preset == "50×50":
-            default_cols, default_rows = 50, 50
-        elif preset == "52×47":
-            default_cols, default_rows = 52, 47
-        elif preset == "100×100":
-            default_cols, default_rows = 100, 100
-        else:
-            default_cols, default_rows = 52, 47
-    
-    with col2:
-        cols = st.number_input("列数", 1, 200, default_cols)
-        rows = st.number_input("行数", 1, 200, default_rows)
-    
-    with col3:
-        remove_watermark = st.checkbox("🧹 去除水印", value=True)
-        st.info(f"📐 图片尺寸: {width} × {height} 像素")
-    
-    st.markdown("---")
-    
-    # ========== 拖动选择区域 ==========
-    st.subheader("2️⃣ 拖动红框选择格子区域")
-    st.caption("👆 用手指/鼠标拖动红框的边缘和角落来调整区域，框内是格子区域，框外是坐标轴")
-    
-    # 使用 cropper 组件
-    # 默认选区
-    default_box = {
-        'left': int(width * 0.025),
-        'top': int(height * 0.035),
-        'width': int(width * 0.95),
-        'height': int(height * 0.795)
-    }
-    
-    # 创建两列布局
-    col_crop, col_result = st.columns(2)
-    
-    with col_crop:
-        st.markdown("**📷 拖动红框选择区域**")
-        
-        # st_cropper 返回裁剪后的图片，但我们需要坐标
-        box = st_cropper(
-            image,
-            realtime_update=True,
-            box_color='red',
-            aspect_ratio=None,
-            return_type='box',
-            default_coords=(
-                default_box['left'],
-                default_box['top'],
-                default_box['left'] + default_box['width'],
-                default_box['top'] + default_box['height']
-            )
-        )
-        
-        # 获取坐标
-        if box:
-            x1 = int(box['left'])
-            y1 = int(box['top'])
-            x2 = int(box['left'] + box['width'])
-            y2 = int(box['top'] + box['height'])
-        else:
-            x1 = default_box['left']
-            y1 = default_box['top']
-            x2 = default_box['left'] + default_box['width']
-            y2 = default_box['top'] + default_box['height']
-        
-        st.caption(f"选区坐标: ({x1}, {y1}) - ({x2}, {y2})")
-    
-    with col_result:
-        st.markdown("**🔄 镜像结果**")
-        
-        if st.button("🚀 开始镜像处理", type="primary", use_container_width=True):
-            if x1 >= x2 or y1 >= y2:
-                st.error("❌ 区域设置错误！")
+    # ===== 参数设置 =====
+    with st.expander("⚙️ 格子设置", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            preset = st.selectbox("预设", ["52×47", "20×20", "29×29", "50×50", "100×100"])
+            if preset == "20×20":
+                default_cols, default_rows = 20, 20
+            elif preset == "29×29":
+                default_cols, default_rows = 29, 29
+            elif preset == "50×50":
+                default_cols, default_rows = 50, 50
+            elif preset == "52×47":
+                default_cols, default_rows = 52, 47
+            elif preset == "100×100":
+                default_cols, default_rows = 100, 100
             else:
-                with st.spinner("正在处理... ⏳"):
-                    result = process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark)
-                    st.session_state['result'] = result
-                st.success(f"✅ 完成！{cols}列 × {rows}行")
-                st.balloons()
+                default_cols, default_rows = 52, 47
+        with col2:
+            cols = st.number_input("列", 1, 200, default_cols)
+            rows = st.number_input("行", 1, 200, default_rows)
+        with col3:
+            remove_watermark = st.checkbox("去水印", value=True)
+            st.caption(f"图片: {width}×{height}")
+    
+    st.markdown("---")
+    
+    # ===== 点击设置区域 =====
+    st.subheader("📍 点击设置格子区域")
+    
+    # 按钮行
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    
+    with col_btn1:
+        if st.button("🔴 设置左上角", use_container_width=True, type="secondary"):
+            st.session_state.click_mode = 'topleft'
+    
+    with col_btn2:
+        if st.button("🔵 设置右下角", use_container_width=True, type="secondary"):
+            st.session_state.click_mode = 'bottomright'
+    
+    with col_btn3:
+        if st.button("🔄 重置", use_container_width=True):
+            st.session_state.x1 = int(width * 0.025)
+            st.session_state.y1 = int(height * 0.035)
+            st.session_state.x2 = int(width * 0.975)
+            st.session_state.y2 = int(height * 0.83)
+            st.session_state.click_mode = None
+            st.rerun()
+    
+    # 显示当前模式
+    if st.session_state.click_mode == 'topleft':
+        st.markdown('<div class="click-hint">👆 现在点击图片设置【左上角】位置</div>', unsafe_allow_html=True)
+    elif st.session_state.click_mode == 'bottomright':
+        st.markdown('<div class="click-hint">👆 现在点击图片设置【右下角】位置</div>', unsafe_allow_html=True)
+    
+    # 显示坐标
+    col_coord1, col_coord2 = st.columns(2)
+    with col_coord1:
+        st.markdown(f'<div class="coord-box">🔴 左上角: ({st.session_state.x1}, {st.session_state.y1})</div>', unsafe_allow_html=True)
+    with col_coord2:
+        st.markdown(f'<div class="coord-box">🔵 右下角: ({st.session_state.x2}, {st.session_state.y2})</div>', unsafe_allow_html=True)
+    
+    # 绘制带标记的图片
+    display_image = draw_selection(image, st.session_state.x1, st.session_state.y1, 
+                                   st.session_state.x2, st.session_state.y2)
+    
+    # 可点击的图片
+    coords = streamlit_image_coordinates(display_image, key="main_image")
+    
+    # 处理点击
+    if coords is not None:
+        click_x = coords["x"]
+        click_y = coords["y"]
         
-        if 'result' in st.session_state:
-            st.image(st.session_state['result'], use_container_width=True)
-            
-            buf = BytesIO()
-            st.session_state['result'].save(buf, format='PNG')
-            buf.seek(0)
-            
-            st.download_button(
-                label="💾 下载镜像图片",
-                data=buf,
-                file_name="拼豆镜像图纸.png",
-                mime="image/png",
-                use_container_width=True,
-                type="primary"
-            )
+        if st.session_state.click_mode == 'topleft':
+            st.session_state.x1 = click_x
+            st.session_state.y1 = click_y
+            st.session_state.click_mode = None
+            st.rerun()
+        elif st.session_state.click_mode == 'bottomright':
+            st.session_state.x2 = click_x
+            st.session_state.y2 = click_y
+            st.session_state.click_mode = None
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # ===== 处理按钮 =====
+    st.subheader("🚀 镜像处理")
+    
+    if st.button("✨ 开始镜像处理", type="primary", use_container_width=True):
+        x1, y1 = st.session_state.x1, st.session_state.y1
+        x2, y2 = st.session_state.x2, st.session_state.y2
+        
+        if x1 >= x2 or y1 >= y2:
+            st.error("❌ 区域错误！确保左上角在右下角的左上方")
+        else:
+            with st.spinner("处理中... ⏳"):
+                result = process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark)
+                st.session_state['result'] = result
+            st.success(f"✅ 完成！{cols}列 × {rows}行")
+            st.balloons()
+    
+    # 显示结果
+    if 'result' in st.session_state:
+        st.image(st.session_state['result'], caption="镜像结果", use_container_width=True)
+        
+        buf = BytesIO()
+        st.session_state['result'].save(buf, format='PNG')
+        buf.seek(0)
+        
+        st.download_button(
+            label="💾 下载镜像图片",
+            data=buf,
+            file_name="拼豆镜像图纸.png",
+            mime="image/png",
+            use_container_width=True,
+            type="primary"
+        )
 
 else:
     # 欢迎页面
@@ -267,43 +337,20 @@ else:
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        <div style="background: #313244; padding: 1.5rem; border-radius: 10px; text-align: center;">
-            <h3>📤 第一步</h3>
-            <p style="color: #a6adc8;">上传拼豆图纸图片</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div style="background: #313244; padding: 1.5rem; border-radius: 10px; text-align: center;">
-            <h3>✋ 第二步</h3>
-            <p style="color: #a6adc8;">拖动红框选择格子区域</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div style="background: #313244; padding: 1.5rem; border-radius: 10px; text-align: center;">
-            <h3>✨ 第三步</h3>
-            <p style="color: #a6adc8;">点击处理并下载</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
     st.markdown("""
-    ### 💡 这个工具可以做什么？
+    ### 📖 使用方法
     
-    当你想按**镜像方向**拼拼豆时，直接翻转图纸会导致格子里的文字也变成镜像，很难看清。
+    1. **上传图片** - 选择你的拼豆图纸
+    2. **设置格子数** - 选择预设或手动输入
+    3. **点击设置区域**：
+       - 点击「🔴 设置左上角」按钮，然后点击图片上格子区域的左上角
+       - 点击「🔵 设置右下角」按钮，然后点击图片上格子区域的右下角
+    4. **镜像处理** - 点击处理并下载
     
-    这个工具可以：
-    - 🔄 **镜像格子位置** - 整体图案左右翻转
-    - 📝 **保持文字正常** - 每个格子里的颜色代码保持正常方向
-    - 🧹 **去除水印** - 可选去除图片上的水印
+    ### 💡 功能特点
+    - 🔄 镜像格子位置，文字保持正常
+    - 🧹 可选去除水印
+    - 📱 支持手机操作
     
     ---
     *Made with 💕*
