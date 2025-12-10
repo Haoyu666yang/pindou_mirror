@@ -44,9 +44,31 @@ st.markdown("""
     .coord-box {
         background: #313244;
         border-radius: 8px;
-        padding: 10px;
+        padding: 15px;
         margin: 5px 0;
         text-align: center;
+        font-size: 1.2rem;
+        font-weight: bold;
+    }
+    .coord-box-red {
+        background: linear-gradient(135deg, #ff6b6b 0%, #c0392b 100%);
+        border-radius: 8px;
+        padding: 15px;
+        margin: 5px 0;
+        text-align: center;
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: white;
+    }
+    .coord-box-blue {
+        background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+        border-radius: 8px;
+        padding: 15px;
+        margin: 5px 0;
+        text-align: center;
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: white;
     }
     .click-hint {
         background: #89b4fa;
@@ -199,6 +221,8 @@ if 'x2' not in st.session_state:
     st.session_state.x2 = None
 if 'y2' not in st.session_state:
     st.session_state.y2 = None
+if 'last_action' not in st.session_state:
+    st.session_state.last_action = None
 
 
 # 主界面
@@ -264,18 +288,22 @@ if uploaded_file is not None:
             st.session_state.click_mode = None
             st.rerun()
     
-    # 显示当前模式
+    # 显示当前模式或成功提示
+    if st.session_state.last_action:
+        st.success(st.session_state.last_action)
+        st.session_state.last_action = None  # 清除提示
+    
     if st.session_state.click_mode == 'topleft':
         st.markdown('<div class="click-hint">👆 现在点击图片设置【左上角】位置</div>', unsafe_allow_html=True)
     elif st.session_state.click_mode == 'bottomright':
         st.markdown('<div class="click-hint">👆 现在点击图片设置【右下角】位置</div>', unsafe_allow_html=True)
     
-    # 显示坐标
+    # 显示坐标（更醒目）
     col_coord1, col_coord2 = st.columns(2)
     with col_coord1:
-        st.markdown(f'<div class="coord-box">🔴 左上角: ({st.session_state.x1}, {st.session_state.y1})</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="coord-box-red">🔴 左上角<br/>({st.session_state.x1}, {st.session_state.y1})</div>', unsafe_allow_html=True)
     with col_coord2:
-        st.markdown(f'<div class="coord-box">🔵 右下角: ({st.session_state.x2}, {st.session_state.y2})</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="coord-box-blue">🔵 右下角<br/>({st.session_state.x2}, {st.session_state.y2})</div>', unsafe_allow_html=True)
     
     # 绘制带标记的图片
     display_image = draw_selection(image, st.session_state.x1, st.session_state.y1, 
@@ -293,11 +321,15 @@ if uploaded_file is not None:
             st.session_state.x1 = click_x
             st.session_state.y1 = click_y
             st.session_state.click_mode = None
+            st.session_state.last_action = f"✅ 左上角已设置: ({click_x}, {click_y})"
+            st.toast(f"🔴 左上角已设置!", icon="✅")
             st.rerun()
         elif st.session_state.click_mode == 'bottomright':
             st.session_state.x2 = click_x
             st.session_state.y2 = click_y
             st.session_state.click_mode = None
+            st.session_state.last_action = f"✅ 右下角已设置: ({click_x}, {click_y})"
+            st.toast(f"🔵 右下角已设置!", icon="✅")
             st.rerun()
     
     st.markdown("---")
