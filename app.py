@@ -8,9 +8,10 @@
 import streamlit as st
 import numpy as np
 import cv2
-from PIL import Image, ImageDraw
+from PIL import Image
 from io import BytesIO
 from collections import Counter
+from streamlit_cropper import st_cropper
 
 st.set_page_config(
     page_title="拼豆图纸镜像工具 💕",
@@ -43,7 +44,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">🎨 拼豆图纸镜像工具</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">上传图纸 → 拖动滑块设置区域 → 一键镜像 ✨</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">上传图纸 → 拖动红框选择区域 → 一键镜像 ✨</p>', unsafe_allow_html=True)
 
 
 def remove_watermark_from_cell(cell_array):
@@ -141,32 +142,6 @@ def process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark):
     return Image.fromarray(new_img_array)
 
 
-def draw_selection_box(image, x1, y1, x2, y2):
-    """在图片上绘制选区框"""
-    img_copy = image.copy()
-    draw = ImageDraw.Draw(img_copy)
-    
-    # 绘制红色边框（粗线）
-    for i in range(4):
-        draw.rectangle([x1-i, y1-i, x2+i, y2+i], outline='red')
-    
-    # 绘制半透明遮罩（选区外的部分变暗）
-    overlay = Image.new('RGBA', img_copy.size, (0, 0, 0, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
-    
-    # 四个遮罩区域
-    width, height = image.size
-    overlay_draw.rectangle([0, 0, width, y1], fill=(0, 0, 0, 100))  # 上
-    overlay_draw.rectangle([0, y2, width, height], fill=(0, 0, 0, 100))  # 下
-    overlay_draw.rectangle([0, y1, x1, y2], fill=(0, 0, 0, 100))  # 左
-    overlay_draw.rectangle([x2, y1, width, y2], fill=(0, 0, 0, 100))  # 右
-    
-    img_copy = img_copy.convert('RGBA')
-    img_copy = Image.alpha_composite(img_copy, overlay)
-    
-    return img_copy.convert('RGB')
-
-
 # 主界面
 uploaded_file = st.file_uploader("📁 上传拼豆图纸", type=['png', 'jpg', 'jpeg', 'bmp', 'webp'])
 
@@ -176,7 +151,7 @@ if uploaded_file is not None:
     
     st.markdown("---")
     
-    # ========== 第一步：设置格子数量 ==========
+    # ========== 设置参数 ==========
     st.subheader("1️⃣ 设置格子数量")
     
     col1, col2, col3 = st.columns([1, 1, 2])
@@ -202,61 +177,60 @@ if uploaded_file is not None:
         rows = st.number_input("行数", 1, 200, default_rows)
     
     with col3:
-        remove_watermark = st.checkbox("🧹 去除水印", value=True, help="去除图片中的水印文字")
-        st.info(f"图片尺寸: {width} × {height} 像素")
+        remove_watermark = st.checkbox("🧹 去除水印", value=True)
+        st.info(f"📐 图片尺寸: {width} × {height} 像素")
     
     st.markdown("---")
     
-    # ========== 第二步：用滑块设置区域 ==========
-    st.subheader("2️⃣ 拖动滑块设置格子区域")
-    st.caption("红框内是格子区域，框外是坐标轴（不会被处理）")
+    # ========== 拖动选择区域 ==========
+    st.subheader("2️⃣ 拖动红框选择格子区域")
+    st.caption("👆 用手指/鼠标拖动红框的边缘和角落来调整区域，框内是格子区域，框外是坐标轴")
     
-    # 默认值
-    default_x1 = int(width * 0.025)
-    default_y1 = int(height * 0.035)
-    default_x2 = int(width * 0.975)
-    default_y2 = int(height * 0.83)
+    # 使用 cropper 组件
+    # 默认选区
+    default_box = {
+        'left': int(width * 0.025),
+        'top': int(height * 0.035),
+        'width': int(width * 0.95),
+        'height': int(height * 0.795)
+    }
     
-    # 滑块设置（更直观）
-    col_slider1, col_slider2 = st.columns(2)
+    # 创建两列布局
+    col_crop, col_result = st.columns(2)
     
-    with col_slider1:
-        st.markdown("**📍 左边界 & 右边界**")
-        x_range = st.slider(
-            "水平范围 (左右)",
-            min_value=0,
-            max_value=width,
-            value=(default_x1, default_x2),
-            help="拖动两端来设置左右边界"
+    with col_crop:
+        st.markdown("**📷 拖动红框选择区域**")
+        
+        # st_cropper 返回裁剪后的图片，但我们需要坐标
+        box = st_cropper(
+            image,
+            realtime_update=True,
+            box_color='red',
+            aspect_ratio=None,
+            return_type='box',
+            default_coords=(
+                default_box['left'],
+                default_box['top'],
+                default_box['left'] + default_box['width'],
+                default_box['top'] + default_box['height']
+            )
         )
-        x1, x2 = x_range
+        
+        # 获取坐标
+        if box:
+            x1 = int(box['left'])
+            y1 = int(box['top'])
+            x2 = int(box['left'] + box['width'])
+            y2 = int(box['top'] + box['height'])
+        else:
+            x1 = default_box['left']
+            y1 = default_box['top']
+            x2 = default_box['left'] + default_box['width']
+            y2 = default_box['top'] + default_box['height']
+        
+        st.caption(f"选区坐标: ({x1}, {y1}) - ({x2}, {y2})")
     
-    with col_slider2:
-        st.markdown("**📍 上边界 & 下边界**")
-        y_range = st.slider(
-            "垂直范围 (上下)",
-            min_value=0,
-            max_value=height,
-            value=(default_y1, default_y2),
-            help="拖动两端来设置上下边界"
-        )
-        y1, y2 = y_range
-    
-    # 显示带选区框的预览
-    preview_image = draw_selection_box(image, x1, y1, x2, y2)
-    
-    st.markdown("---")
-    
-    # ========== 第三步：预览和处理 ==========
-    st.subheader("3️⃣ 预览和处理")
-    
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        st.markdown("**📷 原图（红框=格子区域）**")
-        st.image(preview_image, use_container_width=True)
-    
-    with col_right:
+    with col_result:
         st.markdown("**🔄 镜像结果**")
         
         if st.button("🚀 开始镜像处理", type="primary", use_container_width=True):
@@ -306,8 +280,8 @@ else:
     with col2:
         st.markdown("""
         <div style="background: #313244; padding: 1.5rem; border-radius: 10px; text-align: center;">
-            <h3>⚙️ 第二步</h3>
-            <p style="color: #a6adc8;">拖动滑块设置区域</p>
+            <h3>✋ 第二步</h3>
+            <p style="color: #a6adc8;">拖动红框选择格子区域</p>
         </div>
         """, unsafe_allow_html=True)
     
