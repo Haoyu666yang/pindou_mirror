@@ -8,7 +8,7 @@
 import streamlit as st
 import numpy as np
 import cv2
-from PIL import Image
+from PIL import Image, ImageDraw
 from io import BytesIO
 from collections import Counter
 
@@ -39,22 +39,11 @@ st.markdown("""
         font-size: 1rem;
         margin-bottom: 2rem;
     }
-    .step-card {
-        background: #313244;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
-    div[data-testid="stFileUploader"] {
-        background: #313244;
-        border-radius: 10px;
-        padding: 1rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">🎨 拼豆图纸镜像工具</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">上传图纸 → 设置参数 → 一键镜像 ✨</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">上传图纸 → 拖动滑块设置区域 → 一键镜像 ✨</p>', unsafe_allow_html=True)
 
 
 def remove_watermark_from_cell(cell_array):
@@ -152,6 +141,32 @@ def process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark):
     return Image.fromarray(new_img_array)
 
 
+def draw_selection_box(image, x1, y1, x2, y2):
+    """在图片上绘制选区框"""
+    img_copy = image.copy()
+    draw = ImageDraw.Draw(img_copy)
+    
+    # 绘制红色边框（粗线）
+    for i in range(4):
+        draw.rectangle([x1-i, y1-i, x2+i, y2+i], outline='red')
+    
+    # 绘制半透明遮罩（选区外的部分变暗）
+    overlay = Image.new('RGBA', img_copy.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    
+    # 四个遮罩区域
+    width, height = image.size
+    overlay_draw.rectangle([0, 0, width, y1], fill=(0, 0, 0, 100))  # 上
+    overlay_draw.rectangle([0, y2, width, height], fill=(0, 0, 0, 100))  # 下
+    overlay_draw.rectangle([0, y1, x1, y2], fill=(0, 0, 0, 100))  # 左
+    overlay_draw.rectangle([x2, y1, width, y2], fill=(0, 0, 0, 100))  # 右
+    
+    img_copy = img_copy.convert('RGBA')
+    img_copy = Image.alpha_composite(img_copy, overlay)
+    
+    return img_copy.convert('RGB')
+
+
 # 主界面
 uploaded_file = st.file_uploader("📁 上传拼豆图纸", type=['png', 'jpg', 'jpeg', 'bmp', 'webp'])
 
@@ -159,14 +174,14 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert('RGB')
     width, height = image.size
     
-    # 设置区域
     st.markdown("---")
-    st.subheader("⚙️ 参数设置")
     
-    col1, col2, col3 = st.columns(3)
+    # ========== 第一步：设置格子数量 ==========
+    st.subheader("1️⃣ 设置格子数量")
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
     
     with col1:
-        st.markdown("**📐 格子数量**")
         preset = st.selectbox("预设尺寸", ["52×47", "20×20", "29×29", "50×50", "100×100", "自定义"])
         
         if preset == "20×20":
@@ -181,45 +196,72 @@ if uploaded_file is not None:
             default_cols, default_rows = 100, 100
         else:
             default_cols, default_rows = 52, 47
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            cols = st.number_input("列数", 1, 200, default_cols)
-        with c2:
-            rows = st.number_input("行数", 1, 200, default_rows)
     
     with col2:
-        st.markdown("**📍 格子区域左上角**")
-        default_x1 = int(width * 0.025)
-        default_y1 = int(height * 0.035)
-        x1 = st.number_input("X1 (左边界)", 0, width, default_x1)
-        y1 = st.number_input("Y1 (上边界)", 0, height, default_y1)
+        cols = st.number_input("列数", 1, 200, default_cols)
+        rows = st.number_input("行数", 1, 200, default_rows)
     
     with col3:
-        st.markdown("**📍 格子区域右下角**")
-        default_x2 = int(width * 0.975)
-        default_y2 = int(height * 0.83)
-        x2 = st.number_input("X2 (右边界)", 0, width, default_x2)
-        y2 = st.number_input("Y2 (下边界)", 0, height, default_y2)
-    
-    # 选项
-    remove_watermark = st.checkbox("🧹 去除水印", value=True, help="去除图片中的水印文字")
+        remove_watermark = st.checkbox("🧹 去除水印", value=True, help="去除图片中的水印文字")
+        st.info(f"图片尺寸: {width} × {height} 像素")
     
     st.markdown("---")
     
-    # 图片对比
+    # ========== 第二步：用滑块设置区域 ==========
+    st.subheader("2️⃣ 拖动滑块设置格子区域")
+    st.caption("红框内是格子区域，框外是坐标轴（不会被处理）")
+    
+    # 默认值
+    default_x1 = int(width * 0.025)
+    default_y1 = int(height * 0.035)
+    default_x2 = int(width * 0.975)
+    default_y2 = int(height * 0.83)
+    
+    # 滑块设置（更直观）
+    col_slider1, col_slider2 = st.columns(2)
+    
+    with col_slider1:
+        st.markdown("**📍 左边界 & 右边界**")
+        x_range = st.slider(
+            "水平范围 (左右)",
+            min_value=0,
+            max_value=width,
+            value=(default_x1, default_x2),
+            help="拖动两端来设置左右边界"
+        )
+        x1, x2 = x_range
+    
+    with col_slider2:
+        st.markdown("**📍 上边界 & 下边界**")
+        y_range = st.slider(
+            "垂直范围 (上下)",
+            min_value=0,
+            max_value=height,
+            value=(default_y1, default_y2),
+            help="拖动两端来设置上下边界"
+        )
+        y1, y2 = y_range
+    
+    # 显示带选区框的预览
+    preview_image = draw_selection_box(image, x1, y1, x2, y2)
+    
+    st.markdown("---")
+    
+    # ========== 第三步：预览和处理 ==========
+    st.subheader("3️⃣ 预览和处理")
+    
     col_left, col_right = st.columns(2)
     
     with col_left:
-        st.markdown("### 📷 原图")
-        st.image(image, use_container_width=True)
+        st.markdown("**📷 原图（红框=格子区域）**")
+        st.image(preview_image, use_container_width=True)
     
     with col_right:
-        st.markdown("### 🔄 镜像结果")
+        st.markdown("**🔄 镜像结果**")
         
         if st.button("🚀 开始镜像处理", type="primary", use_container_width=True):
             if x1 >= x2 or y1 >= y2:
-                st.error("❌ 区域设置错误！确保 X1<X2 且 Y1<Y2")
+                st.error("❌ 区域设置错误！")
             else:
                 with st.spinner("正在处理... ⏳"):
                     result = process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark)
@@ -230,7 +272,6 @@ if uploaded_file is not None:
         if 'result' in st.session_state:
             st.image(st.session_state['result'], use_container_width=True)
             
-            # 下载
             buf = BytesIO()
             st.session_state['result'].save(buf, format='PNG')
             buf.seek(0)
@@ -266,7 +307,7 @@ else:
         st.markdown("""
         <div style="background: #313244; padding: 1.5rem; border-radius: 10px; text-align: center;">
             <h3>⚙️ 第二步</h3>
-            <p style="color: #a6adc8;">设置格子数量和区域</p>
+            <p style="color: #a6adc8;">拖动滑块设置区域</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -274,7 +315,7 @@ else:
         st.markdown("""
         <div style="background: #313244; padding: 1.5rem; border-radius: 10px; text-align: center;">
             <h3>✨ 第三步</h3>
-            <p style="color: #a6adc8;">点击处理并下载结果</p>
+            <p style="color: #a6adc8;">点击处理并下载</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -293,4 +334,3 @@ else:
     ---
     *Made with 💕*
     """)
-
