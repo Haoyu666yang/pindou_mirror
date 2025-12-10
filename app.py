@@ -175,9 +175,15 @@ def draw_selection(image, x1, y1, x2, y2):
         draw.ellipse([x2-r, y2-r, x2+r, y2+r], fill='blue', outline='white')
     
     if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
-        # 画矩形框
-        for i in range(3):
-            draw.rectangle([x1-i, y1-i, x2+i, y2+i], outline='lime')
+        # 确保坐标有效再画矩形
+        rect_x1 = min(x1, x2)
+        rect_y1 = min(y1, y2)
+        rect_x2 = max(x1, x2)
+        rect_y2 = max(y1, y2)
+        
+        if rect_x1 < rect_x2 and rect_y1 < rect_y2:
+            for i in range(3):
+                draw.rectangle([rect_x1-i, rect_y1-i, rect_x2+i, rect_y2+i], outline='lime')
     
     return img_copy
 
@@ -300,11 +306,14 @@ if uploaded_file is not None:
     st.subheader("🚀 镜像处理")
     
     if st.button("✨ 开始镜像处理", type="primary", use_container_width=True):
-        x1, y1 = st.session_state.x1, st.session_state.y1
-        x2, y2 = st.session_state.x2, st.session_state.y2
+        # 自动校正坐标顺序
+        x1 = min(st.session_state.x1, st.session_state.x2)
+        y1 = min(st.session_state.y1, st.session_state.y2)
+        x2 = max(st.session_state.x1, st.session_state.x2)
+        y2 = max(st.session_state.y1, st.session_state.y2)
         
-        if x1 >= x2 or y1 >= y2:
-            st.error("❌ 区域错误！确保左上角在右下角的左上方")
+        if x1 == x2 or y1 == y2:
+            st.error("❌ 区域太小！请重新设置")
         else:
             with st.spinner("处理中... ⏳"):
                 result = process_image(image, x1, y1, x2, y2, cols, rows, remove_watermark)
